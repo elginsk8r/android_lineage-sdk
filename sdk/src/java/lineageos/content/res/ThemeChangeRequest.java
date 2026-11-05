@@ -11,9 +11,11 @@ import static lineageos.content.pm.ThemeUtils.MODIFIES_BOOT_ANIM;
 import static lineageos.content.pm.ThemeUtils.MODIFIES_ICONS;
 import static lineageos.content.pm.ThemeUtils.MODIFIES_LAUNCHER;
 import static lineageos.content.pm.ThemeUtils.MODIFIES_LOCKSCREEN;
+import static lineageos.content.pm.ThemeUtils.MODIFIES_NAVIGATION_BAR;
 import static lineageos.content.pm.ThemeUtils.MODIFIES_NOTIFICATIONS;
 import static lineageos.content.pm.ThemeUtils.MODIFIES_OVERLAYS;
 import static lineageos.content.pm.ThemeUtils.MODIFIES_RINGTONES;
+import static lineageos.content.pm.ThemeUtils.MODIFIES_STATUS_BAR;
 
 import android.os.Parcel;
 import android.os.Parcelable;
@@ -42,6 +44,14 @@ public final class ThemeChangeRequest implements Parcelable {
 
     public String getOverlayThemePackageName() {
         return getThemePackageNameForComponent(MODIFIES_OVERLAYS);
+    }
+
+    public String getStatusBarThemePackageName() {
+        return getThemePackageNameForComponent(MODIFIES_STATUS_BAR);
+    }
+
+    public String getNavBarThemePackageName() {
+        return getThemePackageNameForComponent(MODIFIES_NAVIGATION_BAR);
     }
 
     public String getIconsThemePackageName() {
@@ -196,6 +206,14 @@ public final class ThemeChangeRequest implements Parcelable {
             return setComponent(MODIFIES_OVERLAYS, pkgName);
         }
 
+        public Builder setStatusBar(String pkgName) {
+            return setComponent(MODIFIES_STATUS_BAR, pkgName);
+        }
+
+        public Builder setNavBar(String pkgName) {
+            return setComponent(MODIFIES_NAVIGATION_BAR, pkgName);
+        }
+
         public Builder setIcons(String pkgName) {
             return setComponent(MODIFIES_ICONS, pkgName);
         }
@@ -266,6 +284,12 @@ public final class ThemeChangeRequest implements Parcelable {
             }
             if (themeConfig.getOverlayPkgName() != null) {
                 this.setOverlay(themeConfig.getOverlayPkgName());
+            }
+            if (themeConfig.getOverlayForStatusBar() != null) {
+                this.setStatusBar(themeConfig.getOverlayForStatusBar());
+            }
+            if (themeConfig.getOverlayForNavBar() != null) {
+                this.setNavBar(themeConfig.getOverlayForNavBar());
             }
 
             // Check if there are any per-app overlays using this theme

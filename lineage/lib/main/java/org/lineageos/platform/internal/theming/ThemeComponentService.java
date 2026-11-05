@@ -11,9 +11,11 @@ import static lineageos.content.pm.ThemeUtils.MODIFIES_BOOT_ANIM;
 import static lineageos.content.pm.ThemeUtils.MODIFIES_ICONS;
 import static lineageos.content.pm.ThemeUtils.MODIFIES_LAUNCHER;
 import static lineageos.content.pm.ThemeUtils.MODIFIES_LOCKSCREEN;
+import static lineageos.content.pm.ThemeUtils.MODIFIES_NAVIGATION_BAR;
 import static lineageos.content.pm.ThemeUtils.MODIFIES_NOTIFICATIONS;
 import static lineageos.content.pm.ThemeUtils.MODIFIES_OVERLAYS;
 import static lineageos.content.pm.ThemeUtils.MODIFIES_RINGTONES;
+import static lineageos.content.pm.ThemeUtils.MODIFIES_STATUS_BAR;
 
 import android.Manifest;
 import android.annotation.NonNull;
@@ -109,9 +111,9 @@ import org.lineageos.platform.internal.R;
  *
  * <p>Everything is delegated to existing platform mechanisms where one exists:
  * <ul>
- *     <li>Overlays are the theme's runtime resource overlays, toggled through the
- *     {@link android.content.om.OverlayManager}. Overlays in categories owned by SystemUI's
- *     theme controller (shapes, icon packs) are applied through
+ *     <li>Overlays, status bar and navigation bar are the theme's runtime resource overlays,
+ *     toggled through the {@link android.content.om.OverlayManager}. Overlays in categories
+ *     owned by SystemUI's theme controller (shapes, icon packs) are applied through
  *     {@link Settings.Secure#THEME_CUSTOMIZATION_OVERLAY_PACKAGES} while it is in charge.</li>
  *     <li>App icon packs are turned into one fabricated overlay per app replacing its icon, so
  *     the regular resource stack and launchers pick them up.</li>
@@ -126,6 +128,7 @@ public final class ThemeComponentService extends LineageSystemService {
     private static final boolean DEBUG = false;
 
     private static final String ANDROID_PACKAGE = "android";
+    private static final String SYSTEMUI_PACKAGE = "com.android.systemui";
 
     // Fabricated icon overlays are owned by the system and named per user and target, as
     // fabricated overlays are registered for all users.
@@ -148,7 +151,7 @@ public final class ThemeComponentService extends LineageSystemService {
     private static final String CUSTOMIZATION_TIMESTAMP = "_applied_timestamp";
 
     private static final List<String> OVERLAY_COMPONENTS = Arrays.asList(
-            MODIFIES_OVERLAYS);
+            MODIFIES_OVERLAYS, MODIFIES_STATUS_BAR, MODIFIES_NAVIGATION_BAR);
 
     private static final File THEME_DIR = new File(Environment.getDataSystemDirectory(), "theme");
     private static final File BOOTANIMATION_DIR = new File("/data/misc/bootanim/theme");
@@ -170,6 +173,7 @@ public final class ThemeComponentService extends LineageSystemService {
     private final RemoteCallbackList<IThemeChangeListener> mClients = new RemoteCallbackList<>();
     private volatile boolean mIsThemeApplying;
     private volatile int mProgress;
+    private volatile int mCurrentUserId = UserHandle.USER_SYSTEM;
 
     public ThemeComponentService(@NonNull Context context) {
         super(context);
@@ -202,6 +206,14 @@ public final class ThemeComponentService extends LineageSystemService {
             mContext.registerReceiverForAllUsers(mUserRemovedReceiver,
                     new IntentFilter(Intent.ACTION_USER_REMOVED), null, mHandler);
         }
+    }
+
+    @Override
+    public void onUserSwitching(@Nullable TargetUser from, @NonNull TargetUser to) {
+        final int userId = to.getUserIdentifier();
+        mCurrentUserId = userId;
+        // SystemUI runs as the system user, so its overlays follow the foreground user.
+        mHandler.post(() -> applyOverlays(userId, getUserState(userId)));
     }
 
     // ------------------------------------------------------------------------------------------
@@ -357,6 +369,8 @@ public final class ThemeComponentService extends LineageSystemService {
         final Set<String> themes = getInstalledThemes(pm);
         final Map<String, String> owners = new ArrayMap<>();
         final boolean systemUiOwnsCustomizations = !android.server.Flags.enableThemeService();
+        final boolean mirrorToSystem = userId != UserHandle.USER_SYSTEM
+                && userId == mCurrentUserId;
 
         final OverlayManagerTransaction.Builder transaction =
                 new OverlayManagerTransaction.Builder();
@@ -371,7 +385,7 @@ public final class ThemeComponentService extends LineageSystemService {
                     continue;
                 }
                 final boolean enable = themed.theme.equals(
-                        getDesiredTheme(state, overlay.targetPackageName));
+                        getDesiredTheme(state, themed.component, overlay.targetPackageName));
 
                 if (systemUiOwnsCustomizations && overlay.category != null
                         && CUSTOMIZATION_CATEGORIES.contains(overlay.category)) {
@@ -385,6 +399,11 @@ public final class ThemeComponentService extends LineageSystemService {
 
                 if (overlay.isEnabled() != enable) {
                     transaction.setEnabled(overlay.getOverlayIdentifier(), enable, userId);
+                    changed = true;
+                }
+                if (mirrorToSystem && SYSTEMUI_PACKAGE.equals(overlay.targetPackageName)) {
+                    transaction.setEnabled(overlay.getOverlayIdentifier(), enable,
+                            UserHandle.USER_SYSTEM);
                     changed = true;
                 }
             }
@@ -420,7 +439,7 @@ public final class ThemeComponentService extends LineageSystemService {
             return null;
         }
         final String owner = getOwningTheme(pm, overlay.packageName, themes, owners);
-        return owner != null ? new ThemedOverlay(owner, MODIFIES_OVERLAYS) : null;
+        return owner != null ? new ThemedOverlay(owner, getComponent(overlay)) : null;
     }
 
     /**
@@ -451,7 +470,7 @@ public final class ThemeComponentService extends LineageSystemService {
             for (OverlayInfo overlay : overlays) {
                 final ThemedOverlay themed = getThemedOverlay(overlay, pm, themes, owners);
                 if (themed == null || !themed.theme.equals(
-                        getDesiredTheme(state, overlay.targetPackageName))) {
+                        getDesiredTheme(state, themed.component, overlay.targetPackageName))) {
                     continue;
                 }
                 final boolean enabled = customizations != null && overlay.category != null
@@ -491,12 +510,34 @@ public final class ThemeComponentService extends LineageSystemService {
         return !state.perApp.isEmpty();
     }
 
-    /** @return the theme whose overlays should be enabled for a target. */
+    @NonNull
+    private static String getComponent(@NonNull OverlayInfo overlay) {
+        if (SYSTEMUI_PACKAGE.equals(overlay.targetPackageName)) {
+            return ThemeUtils.OVERLAY_CATEGORY_NAVBAR.equals(overlay.category)
+                    ? MODIFIES_NAVIGATION_BAR : MODIFIES_STATUS_BAR;
+        }
+        return MODIFIES_OVERLAYS;
+    }
+
+    /** @return the theme whose overlays should be enabled for a component and target. */
     @Nullable
-    private static String getDesiredTheme(@NonNull UserState state, @NonNull String target) {
-        return state.perApp.containsKey(target)
-                ? state.perApp.get(target)
-                : state.components.get(MODIFIES_OVERLAYS);
+    private static String getDesiredTheme(@NonNull UserState state, @NonNull String component,
+            @NonNull String target) {
+        final Map<String, String> components = state.components;
+        switch (component) {
+            case MODIFIES_NAVIGATION_BAR:
+                return components.containsKey(MODIFIES_NAVIGATION_BAR)
+                        ? components.get(MODIFIES_NAVIGATION_BAR)
+                        : components.get(MODIFIES_OVERLAYS);
+            case MODIFIES_STATUS_BAR:
+                return components.containsKey(MODIFIES_STATUS_BAR)
+                        ? components.get(MODIFIES_STATUS_BAR)
+                        : components.get(MODIFIES_OVERLAYS);
+            default:
+                return state.perApp.containsKey(target)
+                        ? state.perApp.get(target)
+                        : components.get(MODIFIES_OVERLAYS);
+        }
     }
 
     /**
@@ -1314,7 +1355,8 @@ public final class ThemeComponentService extends LineageSystemService {
                 return;
             }
             pw.println("ThemeComponentService:");
-            pw.println("  applying=" + mIsThemeApplying + " progress=" + mProgress);
+            pw.println("  applying=" + mIsThemeApplying + " progress=" + mProgress
+                    + " currentUser=" + mCurrentUserId);
             synchronized (mLock) {
                 for (int i = 0; i < mUserStates.size(); i++) {
                     final UserState state = mUserStates.valueAt(i);
@@ -1393,7 +1435,11 @@ public final class ThemeComponentService extends LineageSystemService {
         ThemeConfig toThemeConfig(@NonNull Predicate<String> isApplied) {
             final ThemeConfig.Builder builder = new ThemeConfig.Builder()
                     .defaultOverlay(getApplied(MODIFIES_OVERLAYS, isApplied))
-                    .defaultIcon(getApplied(MODIFIES_ICONS, isApplied));
+                    .defaultIcon(getApplied(MODIFIES_ICONS, isApplied))
+                    .overlay(ThemeConfig.SYSTEMUI_STATUS_BAR_PKG,
+                            getApplied(MODIFIES_STATUS_BAR, isApplied))
+                    .overlay(ThemeConfig.SYSTEMUI_NAVBAR_PKG,
+                            getApplied(MODIFIES_NAVIGATION_BAR, isApplied));
             for (Map.Entry<String, String> entry : perApp.entrySet()) {
                 if (isApplied.test(entry.getKey())) {
                     builder.overlay(entry.getKey(), entry.getValue());
