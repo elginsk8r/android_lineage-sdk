@@ -7,6 +7,8 @@
 package lineageos.content.res;
 
 import static lineageos.content.pm.ThemeUtils.MODIFIES_ICONS;
+import static lineageos.content.pm.ThemeUtils.MODIFIES_LAUNCHER;
+import static lineageos.content.pm.ThemeUtils.MODIFIES_LOCKSCREEN;
 
 import android.os.Parcel;
 import android.os.Parcelable;
@@ -24,15 +26,30 @@ import java.util.Map;
  * @hide
  */
 public final class ThemeChangeRequest implements Parcelable {
+    public static final int DEFAULT_WALLPAPER_ID = -1;
+
     private final Map<String, String> mThemeComponents = new HashMap<>();
     private final RequestType mRequestType;
+    private final long mWallpaperId;
 
     public String getIconsThemePackageName() {
         return getThemePackageNameForComponent(MODIFIES_ICONS);
     }
 
+    public String getWallpaperThemePackageName() {
+        return getThemePackageNameForComponent(MODIFIES_LAUNCHER);
+    }
+
+    public String getLockWallpaperThemePackageName() {
+        return getThemePackageNameForComponent(MODIFIES_LOCKSCREEN);
+    }
+
     public Map<String, String> getThemeComponentsMap() {
         return Collections.unmodifiableMap(mThemeComponents);
+    }
+
+    public long getWallpaperId() {
+        return mWallpaperId;
     }
 
     public int getNumChangesRequested() {
@@ -47,11 +64,13 @@ public final class ThemeChangeRequest implements Parcelable {
         return mThemeComponents.get(componentName);
     }
 
-    private ThemeChangeRequest(Map<String, String> components, RequestType requestType) {
+    private ThemeChangeRequest(Map<String, String> components, RequestType requestType,
+            long wallpaperId) {
         if (components != null) {
             mThemeComponents.putAll(components);
         }
         mRequestType = requestType;
+        mWallpaperId = wallpaperId;
     }
 
     private ThemeChangeRequest(Parcel source) {
@@ -62,6 +81,7 @@ public final class ThemeChangeRequest implements Parcelable {
         final int requestType = source.readInt();
         mRequestType = requestType >= 0 && requestType < RequestType.values().length
                 ? RequestType.values()[requestType] : RequestType.USER_REQUEST;
+        mWallpaperId = source.readLong();
     }
 
     @Override
@@ -77,12 +97,14 @@ public final class ThemeChangeRequest implements Parcelable {
             dest.writeString(entry.getValue());
         }
         dest.writeInt(mRequestType.ordinal());
+        dest.writeLong(mWallpaperId);
     }
 
     @Override
     public String toString() {
         return "ThemeChangeRequest{components=" + mThemeComponents
-                + ", type=" + mRequestType + "}";
+                + ", type=" + mRequestType
+                + ", wallpaperId=" + mWallpaperId + "}";
     }
 
     public static final Parcelable.Creator<ThemeChangeRequest> CREATOR =
@@ -109,6 +131,7 @@ public final class ThemeChangeRequest implements Parcelable {
     public static class Builder {
         private final Map<String, String> mThemeComponents = new HashMap<>();
         private RequestType mRequestType = RequestType.USER_REQUEST;
+        private long mWallpaperId = DEFAULT_WALLPAPER_ID;
 
         public Builder() {}
 
@@ -120,6 +143,20 @@ public final class ThemeChangeRequest implements Parcelable {
 
         public Builder setIcons(String pkgName) {
             return setComponent(MODIFIES_ICONS, pkgName);
+        }
+
+        public Builder setWallpaper(String pkgName) {
+            return setComponent(MODIFIES_LAUNCHER, pkgName);
+        }
+
+        // Used in the case that more than one wallpaper exists for a given pkg name
+        public Builder setWallpaperId(long id) {
+            mWallpaperId = id;
+            return this;
+        }
+
+        public Builder setLockWallpaper(String pkgName) {
+            return setComponent(MODIFIES_LOCKSCREEN, pkgName);
         }
 
         public Builder setComponent(String component, String pkgName) {
@@ -137,7 +174,7 @@ public final class ThemeChangeRequest implements Parcelable {
         }
 
         public ThemeChangeRequest build() {
-            return new ThemeChangeRequest(mThemeComponents, mRequestType);
+            return new ThemeChangeRequest(mThemeComponents, mRequestType, mWallpaperId);
         }
 
         private void buildChangeRequestFromThemeConfig(ThemeConfig themeConfig) {

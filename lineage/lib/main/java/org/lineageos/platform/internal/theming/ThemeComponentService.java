@@ -7,12 +7,15 @@
 package org.lineageos.platform.internal.theming;
 
 import static lineageos.content.pm.ThemeUtils.MODIFIES_ICONS;
+import static lineageos.content.pm.ThemeUtils.MODIFIES_LAUNCHER;
+import static lineageos.content.pm.ThemeUtils.MODIFIES_LOCKSCREEN;
 
 import android.Manifest;
 import android.annotation.NonNull;
 import android.annotation.Nullable;
 import android.annotation.UserIdInt;
 import android.app.ActivityManager;
+import android.app.WallpaperManager;
 import android.content.BroadcastReceiver;
 import android.content.ComponentName;
 import android.content.Context;
@@ -59,6 +62,7 @@ import java.io.File;
 import java.io.FileDescriptor;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.io.OutputStreamWriter;
@@ -69,6 +73,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.function.Predicate;
 
@@ -90,6 +95,7 @@ import org.lineageos.platform.internal.R;
  * <ul>
  *     <li>App icon packs are turned into one fabricated overlay per app replacing its icon, so
  *     the regular resource stack and launchers pick them up.</li>
+ *     <li>Wallpapers go through the {@link WallpaperManager}.</li>
  * </ul>
  */
 public final class ThemeComponentService extends LineageSystemService {
@@ -187,8 +193,31 @@ public final class ThemeComponentService extends LineageSystemService {
             incrementProgress(progressIncrement);
         }
 
+        if (requested.containsKey(MODIFIES_LAUNCHER)) {
+            if (!updateWallpaper(userId, requested.get(MODIFIES_LAUNCHER),
+                    WallpaperManager.FLAG_SYSTEM, ThemeUtils.WALLPAPER_PATH,
+                    request.getWallpaperId())) {
+                failed.add(MODIFIES_LAUNCHER);
+            }
+            incrementProgress(progressIncrement);
+        }
+
+        if (requested.containsKey(MODIFIES_LOCKSCREEN)) {
+            if (!updateWallpaper(userId, requested.get(MODIFIES_LOCKSCREEN),
+                    WallpaperManager.FLAG_LOCK, ThemeUtils.LOCKSCREEN_WALLPAPER_PATH,
+                    ThemeChangeRequest.DEFAULT_WALLPAPER_ID)) {
+                failed.add(MODIFIES_LOCKSCREEN);
+            }
+            incrementProgress(progressIncrement);
+        }
+
         for (String component : failed) {
             newState.restore(state, component);
+        }
+        for (String component : requested.keySet()) {
+            if (!failed.contains(component)) {
+                newState.setMarker(component, getComponentMarker(userId, component));
+            }
         }
         success &= failed.isEmpty();
 
@@ -395,6 +424,35 @@ public final class ThemeComponentService extends LineageSystemService {
         }
     }
 
+    private boolean updateWallpaper(@UserIdInt int userId, @Nullable String pkgName, int which,
+            @NonNull String assetDir, long wallpaperId) {
+        final WallpaperManager wm = getContextForUser(userId)
+                .getSystemService(WallpaperManager.class);
+        try {
+            if (ThemeUtils.isSystemDefault(pkgName)) {
+                wm.clear(which);
+                return true;
+            }
+            final Context themeContext = getThemeContext(userId, pkgName);
+            final String[] assets = themeContext.getAssets().list(assetDir);
+            if (assets == null || assets.length == 0) {
+                Slog.w(TAG, pkgName + " has no " + assetDir);
+                return false;
+            }
+            Arrays.sort(assets);
+            final int index = wallpaperId >= 0 && wallpaperId < assets.length
+                    ? (int) wallpaperId : 0;
+            try (InputStream in = themeContext.getAssets().open(
+                    assetDir + File.separator + assets[index])) {
+                wm.setStream(in, null, true, which);
+            }
+            return true;
+        } catch (IOException | PackageManager.NameNotFoundException e) {
+            Slog.e(TAG, "Unable to set wallpaper from " + pkgName, e);
+            return false;
+        }
+    }
+
     // ------------------------------------------------------------------------------------------
     // Package and user changes
 
@@ -487,6 +545,12 @@ public final class ThemeComponentService extends LineageSystemService {
         return getContextForUser(userId).getPackageManager();
     }
 
+    @NonNull
+    private Context getThemeContext(@UserIdInt int userId, @NonNull String pkgName)
+            throws PackageManager.NameNotFoundException {
+        return mContext.createPackageContextAsUser(pkgName, 0, UserHandle.of(userId));
+    }
+
     @Nullable
     private ApplicationInfo getApplicationInfo(@UserIdInt int userId, @NonNull String pkgName) {
         try {
@@ -510,6 +574,28 @@ public final class ThemeComponentService extends LineageSystemService {
     }
 
     /**
+     * @return what tells whether a component the service applied is still in place, or null if
+     *         that is checked otherwise, see {@link #isComponentApplied}
+     */
+    @Nullable
+    private String getComponentMarker(@UserIdInt int userId, @NonNull String component) {
+        switch (component) {
+            case MODIFIES_LAUNCHER:
+                return getWallpaperMarker(userId, WallpaperManager.FLAG_SYSTEM);
+            case MODIFIES_LOCKSCREEN:
+                return getWallpaperMarker(userId, WallpaperManager.FLAG_LOCK);
+            default:
+                return null;
+        }
+    }
+
+    @NonNull
+    private String getWallpaperMarker(@UserIdInt int userId, int which) {
+        return String.valueOf(getContextForUser(userId).getSystemService(WallpaperManager.class)
+                .getWallpaperIdForUser(which, userId));
+    }
+
+    /**
      * @return whether a component the service applied for a user is still in place rather than
      *         changed elsewhere since
      */
@@ -518,6 +604,10 @@ public final class ThemeComponentService extends LineageSystemService {
         switch (component) {
             case MODIFIES_ICONS:
                 return areIconOverlaysEnabled(userId);
+            case MODIFIES_LAUNCHER:
+            case MODIFIES_LOCKSCREEN:
+                return Objects.equals(state.markers.get(component),
+                        getComponentMarker(userId, component));
             default:
                 return true;
         }
@@ -688,6 +778,7 @@ public final class ThemeComponentService extends LineageSystemService {
                     final UserState state = mUserStates.valueAt(i);
                     pw.println("  user " + mUserStates.keyAt(i) + ":");
                     pw.println("    components=" + state.components);
+                    pw.println("    markers=" + state.markers);
                     pw.println("    lastChangeTime=" + state.lastChangeTime
                             + " lastRequestType=" + state.lastRequestType);
                 }
@@ -711,20 +802,32 @@ public final class ThemeComponentService extends LineageSystemService {
 
     private static final class UserState {
         private static final String KEY_COMPONENTS = "components";
+        private static final String KEY_MARKERS = "markers";
         private static final String KEY_LAST_CHANGE_TIME = "lastChangeTime";
         private static final String KEY_LAST_REQUEST_TYPE = "lastRequestType";
 
         // Component -> theme package; ThemeConfig.SYSTEM_DEFAULT for an explicit reset
         final Map<String, String> components = new ArrayMap<>();
+        // Component -> what tells whether the component the service applied is still in place
+        final Map<String, String> markers = new ArrayMap<>();
         long lastChangeTime;
         int lastRequestType;
 
         UserState copy() {
             final UserState copy = new UserState();
             copy.components.putAll(components);
+            copy.markers.putAll(markers);
             copy.lastChangeTime = lastChangeTime;
             copy.lastRequestType = lastRequestType;
             return copy;
+        }
+
+        void setMarker(@NonNull String component, @Nullable String marker) {
+            if (marker != null) {
+                markers.put(component, marker);
+            } else {
+                markers.remove(component);
+            }
         }
 
         /** Restores the theme a component had in {@code previous}. */
@@ -734,6 +837,7 @@ public final class ThemeComponentService extends LineageSystemService {
             } else {
                 components.remove(component);
             }
+            setMarker(component, previous.markers.get(component));
         }
 
         /**
@@ -770,6 +874,9 @@ public final class ThemeComponentService extends LineageSystemService {
                         case KEY_COMPONENTS:
                             readMap(reader, state.components);
                             break;
+                        case KEY_MARKERS:
+                            readMap(reader, state.markers);
+                            break;
                         case KEY_LAST_CHANGE_TIME:
                             state.lastChangeTime = reader.nextLong();
                             break;
@@ -798,6 +905,8 @@ public final class ThemeComponentService extends LineageSystemService {
                 writer.beginObject();
                 writer.name(KEY_COMPONENTS);
                 writeMap(writer, components);
+                writer.name(KEY_MARKERS);
+                writeMap(writer, markers);
                 writer.name(KEY_LAST_CHANGE_TIME).value(lastChangeTime);
                 writer.name(KEY_LAST_REQUEST_TYPE).value(lastRequestType);
                 writer.endObject();
