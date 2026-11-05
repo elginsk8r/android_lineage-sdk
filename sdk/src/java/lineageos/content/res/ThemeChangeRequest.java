@@ -8,6 +8,7 @@ package lineageos.content.res;
 
 import static lineageos.content.pm.ThemeUtils.MODIFIES_ALARMS;
 import static lineageos.content.pm.ThemeUtils.MODIFIES_BOOT_ANIM;
+import static lineageos.content.pm.ThemeUtils.MODIFIES_FONTS;
 import static lineageos.content.pm.ThemeUtils.MODIFIES_ICONS;
 import static lineageos.content.pm.ThemeUtils.MODIFIES_LAUNCHER;
 import static lineageos.content.pm.ThemeUtils.MODIFIES_LOCKSCREEN;
@@ -52,6 +53,10 @@ public final class ThemeChangeRequest implements Parcelable {
 
     public String getNavBarThemePackageName() {
         return getThemePackageNameForComponent(MODIFIES_NAVIGATION_BAR);
+    }
+
+    public String getFontThemePackageName() {
+        return getThemePackageNameForComponent(MODIFIES_FONTS);
     }
 
     public String getIconsThemePackageName() {
@@ -214,6 +219,10 @@ public final class ThemeChangeRequest implements Parcelable {
             return setComponent(MODIFIES_NAVIGATION_BAR, pkgName);
         }
 
+        public Builder setFont(String pkgName) {
+            return setComponent(MODIFIES_FONTS, pkgName);
+        }
+
         public Builder setIcons(String pkgName) {
             return setComponent(MODIFIES_ICONS, pkgName);
         }
@@ -279,6 +288,9 @@ public final class ThemeChangeRequest implements Parcelable {
         }
 
         private void buildChangeRequestFromThemeConfig(ThemeConfig themeConfig) {
+            if (themeConfig.getFontPkgName() != null) {
+                this.setFont(themeConfig.getFontPkgName());
+            }
             if (themeConfig.getIconPackPkgName() != null) {
                 this.setIcons(themeConfig.getIconPackPkgName());
             }
