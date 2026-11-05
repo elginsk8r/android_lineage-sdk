@@ -208,4 +208,8 @@
 
     <!-- Advanced rotation settings -->
     <java-symbol type="bool" name="config_enableAdvancedRotationSettings" />
+
+  <!-- Theme component service -->
+  <java-symbol type="string" name="config_defaultThemePackage" />
+  <java-symbol type="array" name="config_defaultThemeComponents" />
 </resources>

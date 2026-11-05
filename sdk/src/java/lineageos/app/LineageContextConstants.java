@@ -89,6 +89,13 @@ public final class LineageContextConstants {
     public static final String LINEAGE_SENSITIVE_PHONE_NUMBERS_SERVICE = "lineagesensitivephone";
 
     /**
+     * Use to access the Theme service.
+     *
+     * @hide
+     */
+    public static final String LINEAGE_THEME_SERVICE = "lineagetheme";
+
+    /**
      * Features supported by the Lineage SDK.
      */
     public static class Features {
@@ -147,5 +154,13 @@ public final class LineageContextConstants {
          */
         @SdkConstant(SdkConstant.SdkConstantType.FEATURE)
         public static final String HEALTH = "org.lineageos.health";
+
+        /**
+         * Feature for {@link PackageManager#getSystemAvailableFeatures} and
+         * {@link PackageManager#hasSystemFeature}: The device includes the lineage theme
+         * service utilized by the lineage sdk and ThemePicker.
+         */
+        @SdkConstant(SdkConstant.SdkConstantType.FEATURE)
+        public static final String THEME = "org.lineageos.theme";
     }
 }
