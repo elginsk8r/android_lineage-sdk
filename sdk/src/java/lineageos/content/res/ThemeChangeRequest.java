@@ -12,6 +12,7 @@ import static lineageos.content.pm.ThemeUtils.MODIFIES_ICONS;
 import static lineageos.content.pm.ThemeUtils.MODIFIES_LAUNCHER;
 import static lineageos.content.pm.ThemeUtils.MODIFIES_LOCKSCREEN;
 import static lineageos.content.pm.ThemeUtils.MODIFIES_NOTIFICATIONS;
+import static lineageos.content.pm.ThemeUtils.MODIFIES_OVERLAYS;
 import static lineageos.content.pm.ThemeUtils.MODIFIES_RINGTONES;
 
 import android.os.Parcel;
@@ -21,8 +22,10 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 
+import lineageos.content.pm.ThemeUtils;
+
 /**
- * Describes a set of theme components to apply.
+ * Describes a set of theme components (and per-app overlays) to apply.
  *
  * <p>A component mapped to {@link ThemeConfig#SYSTEM_DEFAULT} or an empty string is reset to the
  * system default.
@@ -33,8 +36,13 @@ public final class ThemeChangeRequest implements Parcelable {
     public static final int DEFAULT_WALLPAPER_ID = -1;
 
     private final Map<String, String> mThemeComponents = new HashMap<>();
+    private final Map<String, String> mPerAppOverlays = new HashMap<>();
     private final RequestType mRequestType;
     private final long mWallpaperId;
+
+    public String getOverlayThemePackageName() {
+        return getThemePackageNameForComponent(MODIFIES_OVERLAYS);
+    }
 
     public String getIconsThemePackageName() {
         return getThemePackageNameForComponent(MODIFIES_ICONS);
@@ -72,8 +80,17 @@ public final class ThemeChangeRequest implements Parcelable {
         return mWallpaperId;
     }
 
+    /**
+     * Get the mapping for per app themes
+     * @return A mapping of apps and the theme to apply for each one. A null theme removes the
+     *         per app theme.
+     */
+    public Map<String, String> getPerAppOverlays() {
+        return Collections.unmodifiableMap(mPerAppOverlays);
+    }
+
     public int getNumChangesRequested() {
-        return mThemeComponents.size();
+        return mThemeComponents.size() + mPerAppOverlays.size();
     }
 
     public RequestType getRequestType() {
@@ -84,10 +101,13 @@ public final class ThemeChangeRequest implements Parcelable {
         return mThemeComponents.get(componentName);
     }
 
-    private ThemeChangeRequest(Map<String, String> components, RequestType requestType,
-            long wallpaperId) {
+    private ThemeChangeRequest(Map<String, String> components, Map<String, String> perAppThemes,
+            RequestType requestType, long wallpaperId) {
         if (components != null) {
             mThemeComponents.putAll(components);
+        }
+        if (perAppThemes != null) {
+            mPerAppOverlays.putAll(perAppThemes);
         }
         mRequestType = requestType;
         mWallpaperId = wallpaperId;
@@ -97,6 +117,11 @@ public final class ThemeChangeRequest implements Parcelable {
         int numComponents = source.readInt();
         for (int i = 0; i < numComponents; i++) {
             mThemeComponents.put(source.readString(), source.readString());
+        }
+
+        numComponents = source.readInt();
+        for (int i = 0; i < numComponents; i++) {
+            mPerAppOverlays.put(source.readString(), source.readString());
         }
         final int requestType = source.readInt();
         mRequestType = requestType >= 0 && requestType < RequestType.values().length
@@ -116,6 +141,11 @@ public final class ThemeChangeRequest implements Parcelable {
             dest.writeString(entry.getKey());
             dest.writeString(entry.getValue());
         }
+        dest.writeInt(mPerAppOverlays.size());
+        for (Map.Entry<String, String> entry : mPerAppOverlays.entrySet()) {
+            dest.writeString(entry.getKey());
+            dest.writeString(entry.getValue());
+        }
         dest.writeInt(mRequestType.ordinal());
         dest.writeLong(mWallpaperId);
     }
@@ -123,7 +153,7 @@ public final class ThemeChangeRequest implements Parcelable {
     @Override
     public String toString() {
         return "ThemeChangeRequest{components=" + mThemeComponents
-                + ", type=" + mRequestType
+                + ", perApp=" + mPerAppOverlays + ", type=" + mRequestType
                 + ", wallpaperId=" + mWallpaperId + "}";
     }
 
@@ -150,6 +180,7 @@ public final class ThemeChangeRequest implements Parcelable {
 
     public static class Builder {
         private final Map<String, String> mThemeComponents = new HashMap<>();
+        private final Map<String, String> mPerAppOverlays = new HashMap<>();
         private RequestType mRequestType = RequestType.USER_REQUEST;
         private long mWallpaperId = DEFAULT_WALLPAPER_ID;
 
@@ -159,6 +190,10 @@ public final class ThemeChangeRequest implements Parcelable {
             if (themeConfig != null) {
                 buildChangeRequestFromThemeConfig(themeConfig);
             }
+        }
+
+        public Builder setOverlay(String pkgName) {
+            return setComponent(MODIFIES_OVERLAYS, pkgName);
         }
 
         public Builder setIcons(String pkgName) {
@@ -204,18 +239,41 @@ public final class ThemeChangeRequest implements Parcelable {
             return this;
         }
 
+        /**
+         * Theme a single app with the overlays of the given theme. Passing a null theme removes
+         * the per app theme so the app follows {@link ThemeUtils#MODIFIES_OVERLAYS} again.
+         */
+        public Builder setAppOverlay(String appPkgName, String themePkgName) {
+            if (appPkgName != null) {
+                mPerAppOverlays.put(appPkgName, themePkgName);
+            }
+            return this;
+        }
+
         public Builder setRequestType(RequestType requestType) {
             mRequestType = requestType != null ? requestType : RequestType.USER_REQUEST;
             return this;
         }
 
         public ThemeChangeRequest build() {
-            return new ThemeChangeRequest(mThemeComponents, mRequestType, mWallpaperId);
+            return new ThemeChangeRequest(mThemeComponents, mPerAppOverlays,
+                    mRequestType, mWallpaperId);
         }
 
         private void buildChangeRequestFromThemeConfig(ThemeConfig themeConfig) {
             if (themeConfig.getIconPackPkgName() != null) {
                 this.setIcons(themeConfig.getIconPackPkgName());
+            }
+            if (themeConfig.getOverlayPkgName() != null) {
+                this.setOverlay(themeConfig.getOverlayPkgName());
+            }
+
+            // Check if there are any per-app overlays using this theme
+            final Map<String, ThemeConfig.AppTheme> themes = themeConfig.getAppThemes();
+            for (Map.Entry<String, ThemeConfig.AppTheme> entry : themes.entrySet()) {
+                if (ThemeUtils.isPerAppThemeComponent(entry.getKey())) {
+                    this.setAppOverlay(entry.getKey(), entry.getValue().getOverlayPkgName());
+                }
             }
         }
     }
