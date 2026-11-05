@@ -6,9 +6,12 @@
 
 package lineageos.content.res;
 
+import static lineageos.content.pm.ThemeUtils.MODIFIES_ALARMS;
 import static lineageos.content.pm.ThemeUtils.MODIFIES_ICONS;
 import static lineageos.content.pm.ThemeUtils.MODIFIES_LAUNCHER;
 import static lineageos.content.pm.ThemeUtils.MODIFIES_LOCKSCREEN;
+import static lineageos.content.pm.ThemeUtils.MODIFIES_NOTIFICATIONS;
+import static lineageos.content.pm.ThemeUtils.MODIFIES_RINGTONES;
 
 import android.os.Parcel;
 import android.os.Parcelable;
@@ -42,6 +45,18 @@ public final class ThemeChangeRequest implements Parcelable {
 
     public String getLockWallpaperThemePackageName() {
         return getThemePackageNameForComponent(MODIFIES_LOCKSCREEN);
+    }
+
+    public String getAlarmThemePackageName() {
+        return getThemePackageNameForComponent(MODIFIES_ALARMS);
+    }
+
+    public String getNotificationThemePackageName() {
+        return getThemePackageNameForComponent(MODIFIES_NOTIFICATIONS);
+    }
+
+    public String getRingtoneThemePackageName() {
+        return getThemePackageNameForComponent(MODIFIES_RINGTONES);
     }
 
     public Map<String, String> getThemeComponentsMap() {
@@ -157,6 +172,18 @@ public final class ThemeChangeRequest implements Parcelable {
 
         public Builder setLockWallpaper(String pkgName) {
             return setComponent(MODIFIES_LOCKSCREEN, pkgName);
+        }
+
+        public Builder setAlarm(String pkgName) {
+            return setComponent(MODIFIES_ALARMS, pkgName);
+        }
+
+        public Builder setNotification(String pkgName) {
+            return setComponent(MODIFIES_NOTIFICATIONS, pkgName);
+        }
+
+        public Builder setRingtone(String pkgName) {
+            return setComponent(MODIFIES_RINGTONES, pkgName);
         }
 
         public Builder setComponent(String component, String pkgName) {
